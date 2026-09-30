@@ -1,0 +1,10 @@
+{
+  "name": "LoomLens Desktop & Remote Cam Screen Studio",
+  "description": "Production-ready desktop screen and camera recorder with WebRTC smartphone remote camera, 60fps canvas compositor, custom masks, frame overlays, and synchronized recording.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "display-capture"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

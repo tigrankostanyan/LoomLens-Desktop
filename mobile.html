@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>LoomLens - Remote Smartphone Camera Node</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background-color: #090d16;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .video-container {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(1);
+    }
+    video.mirrored {
+      transform: scaleX(-1);
+    }
+    .top-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+      z-index: 20;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      backdrop-filter: blur(8px);
+    }
+    .badge-live {
+      background: rgba(239, 68, 68, 0.25);
+      border: 1px solid rgba(239, 68, 68, 0.6);
+      color: #fca5a5;
+    }
+    .badge-live .dot {
+      width: 8px;
+      height: 8px;
+      background: #ef4444;
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+    .badge-connecting {
+      background: rgba(234, 179, 8, 0.25);
+      border: 1px solid rgba(234, 179, 8, 0.6);
+      color: #fde047;
+    }
+    .badge-connecting .dot {
+      width: 8px;
+      height: 8px;
+      background: #eab308;
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+    .stats-overlay {
+      position: absolute;
+      bottom: 120px;
+      left: 16px;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 8px 12px;
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 15;
+    }
+    .controls-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px 24px 32px;
+      background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      z-index: 20;
+    }
+    .btn-circle {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 20px;
+      transition: all 0.2s ease;
+      backdrop-filter: blur(8px);
+    }
+    .btn-circle:active {
+      transform: scale(0.92);
+      background: #3b82f6;
+    }
+    .btn-circle.active {
+      background: #3b82f6;
+      border-color: #60a5fa;
+    }
+    .btn-circle.torch-active {
+      background: #f59e0b;
+      border-color: #fbbf24;
+      color: #000;
+    }
+    .permission-screen {
+      position: absolute;
+      inset: 0;
+      background: #090d16;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      text-align: center;
+    }
+    .permission-btn {
+      margin-top: 24px;
+      padding: 14px 28px;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.5);
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.2); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Permission / Start Screen -->
+  <div id="permissionScreen" class="permission-screen">
+    <div style="font-size: 48px; margin-bottom: 16px;">📱📹</div>
+    <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 8px;">LoomLens Mobile Cam</h2>
+    <p style="color: #94a3b8; font-size: 14px; max-width: 280px; line-height: 1.5;">
+      Stream your smartphone camera as a high-definition remote talking head for LoomLens Desktop.
+    </p>
+    <button id="startCamBtn" class="permission-btn">Enable Camera & Stream</button>
+  </div>
+
+  <div class="video-container">
+    <video id="previewVideo" playsinline autoplay muted></video>
+
+    <!-- Top status bar -->
+    <div class="top-bar">
+      <div id="statusBadge" class="badge badge-connecting">
+        <span class="dot"></span>
+        <span id="statusText">Connecting...</span>
+      </div>
+      <div style="font-size: 13px; color: #cbd5e1; font-weight: 500;">
+        Room: <span style="color:#60a5fa;" id="roomLabel">loom-studio</span>
+      </div>
+    </div>
+
+    <!-- Real-time Stats -->
+    <div class="stats-overlay" id="statsOverlay">
+      <div>Resolution: <b id="statRes" style="color: #38bdf8;">Loading...</b></div>
+      <div>FPS: <b id="statFps" style="color: #4ade80;">-- fps</b></div>
+      <div>Lens: <b id="statFacing" style="color: #facc15;">Front</b></div>
+    </div>
+
+    <!-- Bottom Controls -->
+    <div class="controls-bar">
+      <!-- Switch Camera -->
+      <button class="btn-circle" id="flipBtn" title="Switch Front/Back Lens">
+        🔄
+      </button>
+
+      <!-- Torch / Flashlight (if supported on back camera) -->
+      <button class="btn-circle" id="torchBtn" title="Toggle Flashlight">
+        🔦
+      </button>
+
+      <!-- Audio Mute / Unmute -->
+      <button class="btn-circle" id="audioBtn" title="Mute/Unmute Mic">
+        🎙️
+      </button>
+
+      <!-- Resolution Mode (1080p / 720p) -->
+      <button class="btn-circle" id="resBtn" title="Toggle HD/Full HD">
+        HD
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // URL Room parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room') || 'loom-studio-room';
+    document.getElementById('roomLabel').textContent = roomId;
+
+    const socket = io();
+    let localStream = null;
+    let peerConnection = null;
+    let currentFacingMode = 'user'; // 'user' or 'environment'
+    let isTorchOn = false;
+    let isAudioEnabled = true;
+    let targetResolution = '1080p'; // '1080p' or '720p'
+    let desktopPeerId = null;
+
+    const previewVideo = document.getElementById('previewVideo');
+    const statusBadge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    const statRes = document.getElementById('statRes');
+    const statFps = document.getElementById('statFps');
+    const statFacing = document.getElementById('statFacing');
+    const flipBtn = document.getElementById('flipBtn');
+    const torchBtn = document.getElementById('torchBtn');
+    const audioBtn = document.getElementById('audioBtn');
+    const resBtn = document.getElementById('resBtn');
+    const permissionScreen = document.getElementById('permissionScreen');
+    const startCamBtn = document.getElementById('startCamBtn');
+
+    // WebRTC ICE configuration
+    const rtcConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    };
+
+    function updateStatus(state, label) {
+      statusBadge.className = 'badge ' + (state === 'live' ? 'badge-live' : 'badge-connecting');
+      statusText.textContent = label;
+    }
+
+    async function initCamera() {
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+      }
+
+      const is1080 = targetResolution === '1080p';
+      const constraints = {
+        video: {
+          facingMode: currentFacingMode,
+          width: { ideal: is1080 ? 1920 : 1280 },
+          height: { ideal: is1080 ? 1080 : 720 },
+          frameRate: { ideal: 60, min: 30 }
+        },
+        audio: isAudioEnabled
+      };
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        previewVideo.srcObject = localStream;
+        previewVideo.className = currentFacingMode === 'user' ? 'mirrored' : '';
+
+        const videoTrack = localStream.getVideoTracks()[0];
+        const settings = videoTrack.getSettings();
+        statRes.textContent = `${settings.width || 0}x${settings.height || 0}`;
+        statFps.textContent = `${Math.round(settings.frameRate || 30)} fps`;
+        statFacing.textContent = currentFacingMode === 'user' ? 'Front (Selfie)' : 'Rear (Main)';
+
+        // If peer connection already exists, replace tracks
+        if (peerConnection) {
+          const senders = peerConnection.getSenders();
+          senders.forEach(sender => {
+            if (sender.track && sender.track.kind === 'video') {
+              sender.replaceTrack(videoTrack);
+            } else if (sender.track && sender.track.kind === 'audio' && localStream.getAudioTracks()[0]) {
+              sender.replaceTrack(localStream.getAudioTracks()[0]);
+            }
+          });
+        }
+
+        // Send telemetry to desktop
+        socket.emit('camera-telemetry', {
+          facingMode: currentFacingMode,
+          resolution: `${settings.width}x${settings.height}`,
+          fps: Math.round(settings.frameRate || 30),
+          torchSupported: !!(videoTrack.getCapabilities && videoTrack.getCapabilities().torch)
+        });
+
+      } catch (err) {
+        console.error('Error accessing camera:', err);
+        alert('Could not access camera: ' + err.message);
+      }
+    }
+
+    // Initialize WebRTC Peer Connection
+    function createPeerConnection(targetId) {
+      if (peerConnection) {
+        peerConnection.close();
+      }
+
+      peerConnection = new RTCPeerConnection(rtcConfig);
+      desktopPeerId = targetId;
+
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, localStream);
+        });
+      }
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate && desktopPeerId) {
+          socket.emit('ice-candidate', {
+            target: desktopPeerId,
+            candidate: event.candidate
+          });
+        }
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        const state = peerConnection.connectionState;
+        console.log('RTC Connection state:', state);
+        if (state === 'connected') {
+          updateStatus('live', 'Streaming 60fps');
+        } else if (state === 'disconnected' || state === 'failed') {
+          updateStatus('connecting', 'Reconnecting...');
+        }
+      };
+
+      return peerConnection;
+    }
+
+    async function startCallWithDesktop(targetPeerId) {
+      if (!targetPeerId) return;
+      desktopPeerId = targetPeerId;
+      console.log('[Mobile] Initiating WebRTC call with desktop peer:', targetPeerId);
+      updateStatus('connecting', 'Connecting to Desktop...');
+
+      const pc = createPeerConnection(targetPeerId);
+
+      try {
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false,
+        });
+        await pc.setLocalDescription(offer);
+
+        socket.emit('offer', {
+          target: targetPeerId,
+          sdp: offer,
+        });
+        console.log('[Mobile] Offer sent to desktop:', targetPeerId);
+      } catch (err) {
+        console.error('[Mobile] Failed to create offer:', err);
+      }
+    }
+
+    // Socket.io signaling
+    socket.on('connect', () => {
+      console.log('Connected to signaling server:', socket.id);
+      socket.emit('join-room', roomId, 'mobile');
+      updateStatus('connecting', 'Looking for desktop studio...');
+    });
+
+    // Handle existing peers already in the room
+    socket.on('room-peers', (peers) => {
+      console.log('[Mobile] Received existing room peers:', peers);
+      const desktop = peers.find(p => p.role === 'desktop');
+      if (desktop) {
+        desktopPeerId = desktop.peerId;
+        if (localStream) {
+          startCallWithDesktop(desktop.peerId);
+        } else {
+          updateStatus('connecting', 'Desktop found! Click Enable Camera');
+        }
+      }
+    });
+
+    socket.on('peer-joined', async ({ peerId, role }) => {
+      if (role === 'desktop') {
+        console.log('Desktop peer joined:', peerId);
+        desktopPeerId = peerId;
+        if (localStream) {
+          startCallWithDesktop(peerId);
+        }
+      }
+    });
+
+    socket.on('offer', async ({ sender, sdp }) => {
+      desktopPeerId = sender;
+      const pc = createPeerConnection(sender);
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit('answer', {
+        target: sender,
+        sdp: answer
+      });
+    });
+
+    socket.on('answer', async ({ sender, sdp }) => {
+      if (peerConnection) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+      }
+    });
+
+    socket.on('ice-candidate', async ({ candidate }) => {
+      if (peerConnection && candidate) {
+        try {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          console.error('Error adding ICE candidate:', e);
+        }
+      }
+    });
+
+    // Remote camera controls triggered from Desktop app
+    socket.on('remote-camera-control', async (cmd) => {
+      if (cmd.action === 'flip') {
+        flipCamera();
+      } else if (cmd.action === 'toggle-torch') {
+        toggleTorch();
+      }
+    });
+
+    // Camera Flip button
+    async function flipCamera() {
+      currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+      isTorchOn = false;
+      torchBtn.classList.remove('torch-active');
+      await initCamera();
+    }
+    flipBtn.addEventListener('click', flipCamera);
+
+    // Torch / Flashlight button
+    async function toggleTorch() {
+      if (!localStream) return;
+      const track = localStream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+
+      if (!capabilities.torch) {
+        alert('Torch/Flashlight not supported on this lens or browser.');
+        return;
+      }
+
+      isTorchOn = !isTorchOn;
+      try {
+        await track.applyConstraints({
+          advanced: [{ torch: isTorchOn }]
+        });
+        torchBtn.classList.toggle('torch-active', isTorchOn);
+      } catch (err) {
+        console.error('Failed to toggle torch:', err);
+      }
+    }
+    torchBtn.addEventListener('click', toggleTorch);
+
+    // Audio mute button
+    audioBtn.addEventListener('click', () => {
+      if (!localStream) return;
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        isAudioEnabled = audioTrack.enabled;
+        audioBtn.textContent = isAudioEnabled ? '🎙️' : '🔇';
+        audioBtn.classList.toggle('active', !isAudioEnabled);
+      }
+    });
+
+    // Resolution button
+    resBtn.addEventListener('click', async () => {
+      targetResolution = targetResolution === '1080p' ? '720p' : '1080p';
+      resBtn.textContent = targetResolution === '1080p' ? 'FHD' : 'HD';
+      await initCamera();
+    });
+
+    // Start button handler
+    startCamBtn.addEventListener('click', async () => {
+      permissionScreen.style.display = 'none';
+      await initCamera();
+      if (desktopPeerId) {
+        startCallWithDesktop(desktopPeerId);
+      }
+    });
+  </script>
+</body>
+</html>
